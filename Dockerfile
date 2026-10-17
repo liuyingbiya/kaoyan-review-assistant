@@ -7,15 +7,20 @@
 FROM maven:3.8-eclipse-temurin-8 AS build
 WORKDIR /app
 
+# 在容器内生成 Maven 配置（阿里云镜像），不拷贝宿主机上的 settings.xml。
+# 为什么：项目里那份 .mvn/settings.xml 是给 Windows 本地用的，里面写死了
+# D:\... 这样的本地仓库路径 —— 放到 Linux 容器里会直接导致构建失败。
+RUN mkdir -p /root/.m2 && printf '%s' \
+    '<settings><mirrors><mirror><id>aliyun</id><name>aliyun</name><url>https://maven.aliyun.com/repository/public</url><mirrorOf>central</mirrorOf></mirror></mirrors></settings>' \
+    > /root/.m2/settings.xml
+
 # 先只拷 pom，让依赖层能被缓存：源码改动不会触发重新下载依赖
 COPY backend/pom.xml .
-COPY backend/.mvn/maven.config .mvn/maven.config
-COPY backend/.mvn/settings.xml .mvn/settings.xml
-RUN mvn -B -q dependency:go-offline
+RUN mvn -B dependency:go-offline
 
 # 再拷源码并打包
 COPY backend/src src
-RUN mvn -B -q -DskipTests package
+RUN mvn -B -DskipTests package
 
 # ---------- 阶段 2：运行 ----------
 FROM eclipse-temurin:8-jre
