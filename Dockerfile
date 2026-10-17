@@ -20,6 +20,11 @@ RUN mvn -B dependency:go-offline
 
 # 再拷源码并打包
 COPY backend/src src
+# ★ 必须把前端目录也拷进构建上下文。
+#   因为 pom.xml 里配了把 ${project.basedir}/../frontend 作为资源打进 jar 的 static/，
+#   在容器里 project.basedir 是 /app，那么 ../frontend 就是 /frontend ——
+#   不拷这一行，构建出来的 jar 里没有任何前端文件，访问 / 会直接 404。
+COPY frontend /frontend
 RUN mvn -B -DskipTests package
 
 # ---------- 阶段 2：运行 ----------
