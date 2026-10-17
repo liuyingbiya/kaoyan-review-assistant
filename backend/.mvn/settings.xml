@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  本项目专用 Maven 配置（不动全局配置）。两个作用：
+    1. 依赖走阿里云镜像（国内快）
+    2. 本地仓库指到 ASCII 绝对路径（这台机器用户名是中文，Maven 处理
+       C:\Users\影和\.m2 会报「系统找不到指定的路径」）
+
+  ★ 这里【复用】点餐系统已经下好的本地仓库，避免重复下载几百 MB。
+    想独立的话，把 localRepository 改成
+    D:\个人项目与简历制作\AI知识库问答\backend\.mvn-repo 即可。
+  ★ 必须是绝对路径，不能用 ${session.rootDirectory} 占位符 ——
+    settings.xml 在 Maven 会话建立前就被读取，占位符不会替换。
+-->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 https://maven.apache.org/xsd/settings-1.0.0.xsd">
+
+  <localRepository>D:\个人项目与简历制作\点餐系统-SpringBoot\.mvn-repo</localRepository>
+
+  <mirrors>
+    <mirror>
+      <id>aliyun-central</id>
+      <name>Aliyun Public Mirror</name>
+      <url>https://maven.aliyun.com/repository/public</url>
+      <mirrorOf>central</mirrorOf>
+    </mirror>
+  </mirrors>
+</settings>

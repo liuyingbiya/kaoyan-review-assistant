@@ -1,0 +1,51 @@
+# ============================================================
+#  一条命令起「应用 + MySQL」：docker compose up --build
+#
+#  注意 depends_on 的 condition: service_healthy
+#  —— 只写 depends_on 只能保证容器启动，不能保证 MySQL 已经可以接受连接。
+#     加了 healthcheck，应用会等 MySQL 真正就绪后再启动。
+# ============================================================
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: aikb-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: ai_kb
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      # ngram 分词大小，默认就是 2，这里显式写出来避免不同版本差异
+      - --ngram_token_size=2
+    ports:
+      - "3307:3306"
+    volumes:
+      - ./backend/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+      - aikb-mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aikb-app
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/ai_kb?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=UTF-8&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: root
+      # 有 key 就填，没有就走本地模拟模式
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      RAG_SEED_DIR: /app/seed
+    ports:
+      - "8081:8081"
+
+volumes:
+  aikb-mysql-data:

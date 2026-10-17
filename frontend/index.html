@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>考研复习助手</title>
+
+  <!--
+    前端说明（面试会问，也是你以后要能讲清的点）：
+
+    这个前端【不需要构建】：直接加载 Vue 3 的 global 构建产物 + Element Plus 的 UMD 包。
+    理由：
+      1. 页面就一个，组件 4 个，没有复杂的模块图，用不上 Tree-shaking / HMR
+      2. 不用装 Node、不用 npm build、不用配 Nginx —— 前端产物直接打进后端 jar，
+         启动一个 java -jar，打开 http://localhost:8081 就能用
+      3. vendor 里的库是本地文件，不依赖 CDN，断网也能演示
+
+    代码仍然按 Vue 3 的方式组织：组件化、props/emit、响应式、生命周期一个不少，
+    只是省掉了打包这一步（加载顺序在下面这些 script 标签里写死）。
+
+    ⚠️ 顺序不能乱：先 vue，再 element-plus，再语言包与图标，最后才是业务代码。
+  -->
+  <link rel="stylesheet" href="/vendor/element-plus.css" />
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <div id="app"></div>
+
+  <!-- 第三方库 -->
+  <script src="/vendor/vue.global.prod.js"></script>
+  <script src="/vendor/element-plus.js"></script>
+  <script src="/vendor/zh-cn.js"></script>
+  <script src="/vendor/icons.js"></script>
+
+  <!-- 业务代码 -->
+  <script src="/js/api.js"></script>
+  <script src="/js/markdown.js"></script>
+  <script src="/js/components/subject-tree.js"></script>
+  <script src="/js/components/session-list.js"></script>
+  <script src="/js/components/chat-panel.js"></script>
+  <script src="/js/components/kb-manager.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>

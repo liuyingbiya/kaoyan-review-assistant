@@ -1,0 +1,31 @@
+# ---------- Java ----------
+target/
+*.class
+*.jar
+!.mvn/wrapper/maven-wrapper.jar
+
+# ---------- Maven 本地仓库（复用点餐系统那份，不进版本库）----------
+.mvn-repo/
+
+# ---------- 运行时临时目录 ----------
+.runtime/
+*.log
+logs/
+
+# ---------- 前端依赖与缓存 ----------
+node_modules/
+.npm-cache/
+.uitest/node_modules/
+
+# ---------- IDE ----------
+.idea/
+*.iml
+.vscode/
+
+# ---------- 系统 ----------
+.DS_Store
+Thumbs.db
+
+# ---------- 密钥（绝对不要提交）----------
+.env
+*.key
