@@ -60,8 +60,10 @@ public class LocalAnswerer {
             for (KbChunk c : chunks) {
                 String title = c.getDocTitle() == null ? "资料" : c.getDocTitle();
                 for (String s : splitSentences(c.getContent())) {
-                    String t = s.trim();
-                    if (t.length() < 8 || t.length() > MAX_SENTENCE_LEN) {
+                    // 清掉 Markdown 标记（**加粗**、`代码`），回答里不该出现这些符号
+                    String t = s.replace("**", "").replace("`", "").trim();
+                    // 太短没信息量、太长掺无关内容、被切断的碎片，都丢掉
+                    if (!usable(t) || t.length() > MAX_SENTENCE_LEN) {
                         continue;
                     }
                     sentences.add(t);
@@ -90,6 +92,7 @@ public class LocalAnswerer {
         Arrays.sort(order, Comparator.comparingDouble((Integer i) -> scores[i]).reversed());
 
         List<Integer> picked = new ArrayList<>();
+        List<String> pickedTexts = new ArrayList<>();
         Set<String> seen = new HashSet<>();
         for (Integer idx : order) {
             if (picked.size() >= MAX_SENTENCES) {
@@ -99,12 +102,25 @@ public class LocalAnswerer {
             if (scores[idx] <= 0) {
                 break;
             }
+            String text = sentences.get(idx);
             // 去掉几乎重复的句子（资料切片有 80 字重叠，会出现重复句）
-            String norm = sentences.get(idx).replaceAll("\\s", "");
+            String norm = text.replaceAll("\\s", "");
             if (seen.contains(norm)) {
                 continue;
             }
+            // 近似重复也要去掉：一句包含另一句时只留长的
+            boolean dup = false;
+            for (String t2 : pickedTexts) {
+                if (similar(text, t2)) {
+                    dup = true;
+                    break;
+                }
+            }
+            if (dup) {
+                continue;
+            }
             seen.add(norm);
+            pickedTexts.add(text);
             picked.add(idx);
         }
 
@@ -115,15 +131,13 @@ public class LocalAnswerer {
             return;
         }
 
-        // 按原文顺序排，读起来像一段连贯的话，而不是乱序摘句
-        picked.sort(Integer::compareTo);
-
         // ---------- 组织输出 ----------
+        // picked 已按得分从高到低排序：第一句就是最贴近问题的，直接当"结论"放在最前面，
+        // 后面再按得分列要点。这样即使原文顺序里那句在后面，回答也先给最关键的。
         StringBuilder sb = new StringBuilder();
         sb.append(lead(question)).append("\n\n");
-        int n = 1;
-        for (Integer idx : picked) {
-            sb.append(n++).append(". ").append(sentences.get(idx)).append("\n");
+        for (int i = 0; i < picked.size(); i++) {
+            sb.append(i + 1).append(". ").append(sentences.get(picked.get(i))).append("\n");
         }
 
         // 引用来源（去重）
@@ -167,22 +181,43 @@ public class LocalAnswerer {
             return out;
         }
         String[] parts = question.split("[\\s，。！？、；：,.!?;:（）()\\[\\]【】\"'`]+");
+        Set<String> seen = new LinkedHashSet<>();
         for (String p : parts) {
             String t = p.trim();
-            if (t.length() < 2 || STOP_WORDS.contains(t)) {
+            if (t.length() < 2) {
                 continue;
             }
-            out.add(t);
-        }
-        if (out.isEmpty()) {
-            // 全是虚词时，退化成按长度取前两段，避免零关键词
-            for (String p : parts) {
-                if (p.trim().length() >= 2) {
-                    out.add(p.trim());
+            if (!STOP_WORDS.contains(t)) {
+                seen.add(t);
+            }
+            // 中文没有空格，一个问题往往是一整串字（如「死锁的四个必要条件是什么」）。
+            // 如果只把它当成一个词，几乎不可能在句子里原样出现，得分恒为 0。
+            // 所以再切出 2 字和 3 字的滑窗（死锁 / 锁的 / 四个 / 条件 …），
+            // 这样只要句子里出现了「死锁」「条件」就能命中。
+            if (isAllCjk(t)) {
+                for (int n = 2; n <= 3; n++) {
+                    for (int i = 0; i + n <= t.length(); i++) {
+                        String g = t.substring(i, i + n);
+                        if (!STOP_WORDS.contains(g)) {
+                            seen.add(g);
+                        }
+                    }
                 }
             }
         }
+        out.addAll(seen);
         return out;
+    }
+
+    /** 是否全为汉字（用于判断要不要做中文切词） */
+    private boolean isAllCjk(String s) {
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c < 0x4E00 || c > 0x9FA5) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** 句子得分 = 每个关键词出现次数之和；完整短语命中额外加权 */
@@ -224,20 +259,123 @@ public class LocalAnswerer {
             char ch = text.charAt(i);
             cur.append(ch);
             if (ch == '。' || ch == '！' || ch == '？' || ch == '；' || ch == '\n') {
-                String s = cur.toString().replaceAll("^[\\s#>\\-*]+", "").trim();
-                if (!s.isEmpty()) {
-                    out.add(s);
+                String before = cur.toString();
+                // 以 # 开头的是 Markdown 标题，不是句子 —— 摘进回答会变成孤零零的一行
+                if (!before.trim().startsWith("#")) {
+                    String raw = cleanLine(before);
+                    if (!raw.isEmpty()) {
+                        out.add(raw);
+                    }
                 }
                 cur.setLength(0);
             }
         }
         if (cur.length() > 0) {
-            String s = cur.toString().trim();
-            if (!s.isEmpty()) {
-                out.add(s);
+            String before = cur.toString();
+            if (!before.trim().startsWith("#")) {
+                String raw = cleanLine(before);
+                if (!raw.isEmpty()) {
+                    out.add(raw);
+                }
             }
         }
         return out;
+    }
+
+    /**
+     * 清掉行首的 Markdown 与列表标记。
+     *
+     * 不处理会出现这种句子：「3. 证明题主要集中在：…」
+     * —— 序号被当成正文一起摘进回答，读起来像格式错乱。
+     */
+    private String cleanLine(String s) {
+        String t = s.trim();
+        t = t.replaceAll("^[#>{|]+\\s*", "");            // 标题 / 引用 / 表格符
+        t = t.replaceAll("^(?:[-*•]+|\\d+[.、)])\\s*", ""); // 无序列表 / 有序列表
+        return t.trim();
+    }
+
+    /**
+     * 两句是否近似重复。
+     *
+     * 资料切片有 80 字重叠，同一句话会以细微差别出现两次，例如：
+     *   「四个同时成立才可能死锁，破坏任意一个即可预防。」
+     *   「四个同时成立才可能死锁，破坏任一即可预防。」
+     * 只判断"包含"抓不住这种（两者互不包含），所以用字符二元组的 Jaccard 相似度。
+     */
+    private boolean similar(String a, String b) {
+        String x = normalize(a);
+        String y = normalize(b);
+        if (x.length() < 6 || y.length() < 6) {
+            return false;
+        }
+        if (x.contains(y) || y.contains(x)) {
+            int min = Math.min(x.length(), y.length());
+            int max = Math.max(x.length(), y.length());
+            if (min * 1.0 / max >= 0.5) {
+                return true;
+            }
+        }
+        return jaccard(x, y) >= 0.6;
+    }
+
+    /** 去掉标点与空白，统一小写，便于比较 */
+    private String normalize(String s) {
+        return s.replaceAll("[\\s，。、；：！？（）《》\"'`*·—…]", "").toLowerCase();
+    }
+
+    /** 字符二元组 Jaccard 相似度（0~1） */
+    private double jaccard(String a, String b) {
+        Set<String> sa = bigrams(a);
+        Set<String> sb = bigrams(b);
+        if (sa.isEmpty() || sb.isEmpty()) {
+            return 0;
+        }
+        Set<String> inter = new HashSet<>(sa);
+        inter.retainAll(sb);
+        Set<String> union = new HashSet<>(sa);
+        union.addAll(sb);
+        return inter.size() * 1.0 / union.size();
+    }
+
+    private Set<String> bigrams(String s) {
+        Set<String> out = new HashSet<>();
+        for (int i = 0; i + 2 <= s.length(); i++) {
+            out.add(s.substring(i, i + 2));
+        }
+        return out;
+    }
+
+    /**
+     * 过滤掉「被切断的碎片」。
+     *
+     * 为什么需要：文档切片是每 400 字一刀，切点可能落在一个词中间，
+     * 于是片段里会出现以半个英文单词（llocation）、右括号开头的句子。
+     * 这种句子放进回答里很难看，也说明它本身不完整。
+     */
+    private boolean usable(String s) {
+        if (s.length() < 8) {
+            return false;
+        }
+        char c0 = s.charAt(0);
+        if (c0 == '）' || c0 == ')' || c0 == '】' || c0 == '」' || c0 == '、'
+                || c0 == '，' || c0 == '。' || c0 == '；' || c0 == '：') {
+            return false;
+        }
+        // 小写字母开头 → 多半是从中间被切开的英文单词
+        if (c0 >= 'a' && c0 <= 'z') {
+            return false;
+        }
+        // 至少要有一点汉字，纯符号/纯数字的片段没意义
+        boolean hasCjk = false;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c >= 0x4E00 && c <= 0x9FA5) {
+                hasCjk = true;
+                break;
+            }
+        }
+        return hasCjk || s.length() >= 20;
     }
 
     private String firstSentences(List<String> sentences, int n) {
