@@ -38,15 +38,18 @@ public class ChatService {
     private final RetrievalService retrieval;
     private final LlmClient llm;
     private final SubjectMapper subjectMapper;
+    /** 离线回答引擎：没配 API Key 时用它，不消耗任何额度 */
+    private final LocalAnswerer localAnswerer;
 
     private final ExecutorService pool = Executors.newFixedThreadPool(8);
 
     public ChatService(ChatMapper chatMapper, RetrievalService retrieval, LlmClient llm,
-                       SubjectMapper subjectMapper) {
+                       SubjectMapper subjectMapper, LocalAnswerer localAnswerer) {
         this.chatMapper = chatMapper;
         this.retrieval = retrieval;
         this.llm = llm;
         this.subjectMapper = subjectMapper;
+        this.localAnswerer = localAnswerer;
     }
 
     @PreDestroy
@@ -112,14 +115,20 @@ public class ChatService {
                     }
                 }
 
-                // ---------- 5. 流式调用 ----------
+                // ---------- 5. 生成回答 ----------
+                // 两条路径：
+                //   · 配了 API Key → 调 DeepSeek 流式生成（会消耗 token）
+                //   · 没配 → 走离线回答引擎，只用检索到的原文组织答案，零成本、零编造
                 StringBuilder answer = new StringBuilder();
-                llm.streamChat(messages,
-                        delta -> {
-                            answer.append(delta);
-                            send(emitter, "delta", obj("text", delta));
-                        },
-                        contexts);
+                java.util.function.Consumer<String> sink = delta -> {
+                    answer.append(delta);
+                    send(emitter, "delta", obj("text", delta));
+                };
+                if (llm.isMock()) {
+                    localAnswerer.answer(question, hits, sink);
+                } else {
+                    llm.streamChat(messages, sink, contexts);
+                }
 
                 // ---------- 6. 引用 + 落库 ----------
                 send(emitter, "citations", obj("items", citations));
