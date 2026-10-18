@@ -46,7 +46,7 @@ public class ChatController {
         m.put("mock", llm.isMock());
         m.put("model", llm.modelName());
         m.put("hint", llm.isMock()
-                ? "未配置 DEEPSEEK_API_KEY，当前为本地模拟模式"
+                ? "离线检索模式（不调用大模型、不消耗额度）"
                 : "已接入 DeepSeek");
         return m;
     }
