@@ -98,13 +98,20 @@ window.AIKB.ChatPanel = {
           <div class="answer-text md" v-html="rendered(m)"></div>
 
           <el-collapse v-if="m.citations && m.citations.length" class="citations">
-            <el-collapse-item :title="'引用来源（' + m.citations.length + ' 段）'" :name="String(i)">
+            <el-collapse-item :title="'引用来源（' + m.citations.length + ' 条）'" :name="String(i)">
               <div v-for="(c, ci) in m.citations" :key="ci" class="citation">
                 <div class="citation-head">
-                  <el-tag size="small" effect="plain">{{ c.docTitle }}</el-tag>
-                  <span class="muted">第 {{ c.seq }} 段 · 相关度 {{ formatScore(c.score) }}</span>
+                  <el-tag size="small" effect="plain" :type="c.web ? 'warning' : ''">
+                    {{ c.web ? '联网' : c.docTitle }}
+                  </el-tag>
+                  <!-- 联网结果给可点击的链接；本地资料显示段落号与相关度 -->
+                  <a v-if="c.url" :href="c.url" target="_blank" rel="noopener noreferrer" class="cite-link">
+                    {{ c.web ? c.docTitle : c.url }}
+                  </a>
+                  <span v-else class="muted">第 {{ c.seq }} 段 · 相关度 {{ formatScore(c.score) }}</span>
                 </div>
                 <div class="citation-body">{{ c.content }}</div>
+                <div v-if="c.url" class="citation-url">{{ c.url }}</div>
               </div>
             </el-collapse-item>
           </el-collapse>
