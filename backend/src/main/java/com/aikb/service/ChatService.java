@@ -6,6 +6,7 @@ import com.aikb.model.ChatMsg;
 import com.aikb.model.ChatSession;
 import com.aikb.model.KbChunk;
 import com.aikb.model.Subject;
+import com.aikb.model.WebResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,16 +41,20 @@ public class ChatService {
     private final SubjectMapper subjectMapper;
     /** 离线回答引擎：没配 API Key 时用它，不消耗任何额度 */
     private final LocalAnswerer localAnswerer;
+    /** 联网检索：题库没命中时的兜底 */
+    private final WebSearchService webSearch;
 
     private final ExecutorService pool = Executors.newFixedThreadPool(8);
 
     public ChatService(ChatMapper chatMapper, RetrievalService retrieval, LlmClient llm,
-                       SubjectMapper subjectMapper, LocalAnswerer localAnswerer) {
+                       SubjectMapper subjectMapper, LocalAnswerer localAnswerer,
+                       WebSearchService webSearch) {
         this.chatMapper = chatMapper;
         this.retrieval = retrieval;
         this.llm = llm;
         this.subjectMapper = subjectMapper;
         this.localAnswerer = localAnswerer;
+        this.webSearch = webSearch;
     }
 
     @PreDestroy
@@ -118,14 +123,31 @@ public class ChatService {
                 // ---------- 5. 生成回答 ----------
                 // 两条路径：
                 //   · 配了 API Key → 调 DeepSeek 流式生成（会消耗 token）
-                //   · 没配 → 走离线回答引擎，只用检索到的原文组织答案，零成本、零编造
+                //   · 没配 → 离线回答引擎；如果题库里没有能答的句子，再联网检索兜底
                 StringBuilder answer = new StringBuilder();
                 java.util.function.Consumer<String> sink = delta -> {
                     answer.append(delta);
                     send(emitter, "delta", obj("text", delta));
                 };
                 if (llm.isMock()) {
-                    localAnswerer.answer(question, hits, sink);
+                    LocalAnswerer.Answer local = localAnswerer.build(question, hits);
+                    String text = local.text;
+                    // 题库优先、联网兜底：只有「本地没命中」时才去问搜索引擎
+                    if (!local.matched && webSearch.isEnabled()) {
+                        List<WebResult> webs = webSearch.search(question, 5);
+                        if (!webs.isEmpty()) {
+                            text = composeWebAnswer(webs);
+                            for (WebResult w : webs) {
+                                Map<String, Object> item = new HashMap<>();
+                                item.put("docTitle", w.getTitle());
+                                item.put("url", w.getUrl());
+                                item.put("content", w.getSnippet());
+                                item.put("web", true);
+                                citations.add(item);
+                            }
+                        }
+                    }
+                    localAnswerer.emit(text, sink);
                 } else {
                     llm.streamChat(messages, sink, contexts);
                 }
@@ -183,6 +205,29 @@ public class ChatService {
                         .append(contexts.get(i)).append("\n\n");
             }
         }
+        return sb.toString();
+    }
+
+    /**
+     * 把联网检索结果组织成可读回答。
+     *
+     * 注意用词：这里不是"AI 回答"，是"搜索结果摘要"。
+     * 不调大模型时，我们能保证的只有「内容是真实的、链接是能点开的」，
+     * 不能保证「像人一样组织过」——这一点在结尾括号里写明，避免误导。
+     */
+    private String composeWebAnswer(List<WebResult> webs) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("题库里没有，我联网查了一下：\n\n");
+        int i = 1;
+        for (WebResult w : webs) {
+            sb.append(i++).append(". ").append(w.getTitle()).append("\n");
+            String s = w.getSnippet();
+            if (s != null && !s.isEmpty()) {
+                sb.append("   ").append(s).append("\n");
+            }
+            sb.append("   ").append(w.getUrl()).append("\n");
+        }
+        sb.append("\n（联网检索模式：以上为搜索结果摘要，未调用大模型；点开引用来源可看原文）");
         return sb.toString();
     }
 
