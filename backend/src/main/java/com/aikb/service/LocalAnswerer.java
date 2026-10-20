@@ -171,11 +171,15 @@ public class LocalAnswerer {
         if (q == null) {
             return "根据资料：";
         }
-        if (q.contains("为什么") || q.contains("原因")) {
-            return "原因主要有这几点：";
-        }
         if (q.contains("区别") || q.contains("不同") || q.contains("对比")) {
             return "两者的区别如下：";
+        }
+        // 「哪几种 / 哪些」要在「几」之前判断，否则会掉进"具体数值"分支
+        if (q.contains("哪些") || q.contains("哪几种") || q.contains("哪类") || q.contains("几种")) {
+            return "主要有这几类：";
+        }
+        if (q.contains("为什么") || q.contains("原因")) {
+            return "原因主要有这几点：";
         }
         if (q.contains("怎么") || q.contains("如何") || q.contains("怎样") || q.contains("步骤")) {
             return "可以按下面的思路做：";
@@ -183,7 +187,7 @@ public class LocalAnswerer {
         if (q.contains("条件") || q.contains("必要")) {
             return "需要满足的条件是：";
         }
-        if (q.contains("多少") || q.contains("几")) {
+        if (q.contains("多少") || q.contains("几分") || q.contains("几个")) {
             return "具体数值如下：";
         }
         return "根据资料：";
