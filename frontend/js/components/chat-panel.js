@@ -17,7 +17,11 @@ window.AIKB.ChatPanel = {
     draft: { type: String, default: '' },
     citations: { type: Array, default: () => [] },
     streaming: { type: Boolean, default: false },
-    examples: { type: Array, default: () => [] }
+    examples: { type: Array, default: () => [] },
+    // 使用范围声明（后端 /api/chat/status 下发），开始界面直接展示
+    notice: { type: String, default: '' },
+    // 本次提问被分析出的关键词
+    keywords: { type: Array, default: () => [] }
   },
   emits: ['send'],
   data() {
@@ -77,6 +81,13 @@ window.AIKB.ChatPanel = {
     <div class="messages" ref="scroller">
       <div v-if="!messages.length && !draft" class="empty">
         <div class="empty-title">{{ subjectName || '请选择科目' }}</div>
+
+        <!-- 使用范围声明：开始界面最显眼的位置，避免用户问无关问题 -->
+        <div v-if="notice" class="scope-notice">
+          <span class="scope-icon">!</span>
+          <span>{{ notice }}</span>
+        </div>
+
         <div class="empty-tip">试试这样问：</div>
         <div class="examples">
           <el-button
@@ -95,6 +106,17 @@ window.AIKB.ChatPanel = {
         :class="m.role === 'user' ? 'msg-user' : 'msg-assistant'">
         <div class="avatar">{{ m.role === 'user' ? '我' : 'AI' }}</div>
         <div class="bubble">
+          <!-- 关键词分析结果：让用户看见系统是怎么理解这个问题的 -->
+          <div v-if="m.keywords && m.keywords.length" class="kw-row">
+            <span class="kw-label">关键词</span>
+            <el-tag
+              v-for="k in m.keywords"
+              :key="k"
+              size="small"
+              effect="plain"
+              class="kw-tag">{{ k }}</el-tag>
+          </div>
+
           <div class="answer-text md" v-html="rendered(m)"></div>
 
           <el-collapse v-if="m.citations && m.citations.length" class="citations">
@@ -121,6 +143,15 @@ window.AIKB.ChatPanel = {
       <div v-if="draft" class="msg msg-assistant">
         <div class="avatar">AI</div>
         <div class="bubble">
+          <div v-if="keywords && keywords.length" class="kw-row">
+            <span class="kw-label">关键词</span>
+            <el-tag
+              v-for="k in keywords"
+              :key="k"
+              size="small"
+              effect="plain"
+              class="kw-tag">{{ k }}</el-tag>
+          </div>
           <div class="answer-text md"><span v-html="renderedDraft"></span><span v-if="streaming" class="cursor">▍</span></div>
           <div v-if="streaming" class="muted" style="margin-top:6px">正在生成…</div>
         </div>
