@@ -43,18 +43,38 @@ public class ChatService {
     private final LocalAnswerer localAnswerer;
     /** 联网检索：题库没命中时的兜底 */
     private final WebSearchService webSearch;
+    /** 关键词分析：既用于展示，也用于检索兜底 */
+    private final KeywordAnalyzer keywordAnalyzer;
+
+    /** 使用范围声明：程序只做考研咨询，其他问题会被这条声明挡一下 */
+    public static final String SCOPE_NOTICE = "本程序只提供考研方面咨询，请不要提问无关信息。";
+
+    /**
+     * 判断「考研相关」的关键词。
+     *
+     * 为什么需要：题库查不到时我们会去联网，但如果不先判断范围，
+     * 用户问「今天北京天气」也会真去搜天气 —— 这和程序声明的用途矛盾。
+     * 所以：题库没命中时，先看问题里有没有这些词，没有就直接拒答。
+     */
+    private static final String[] SCOPE_MARKERS = {
+            "考研", "真题", "复习", "考试", "初试", "复试", "专业课", "公共课", "上岸",
+            "分数线", "大纲", "题型", "考点", "笔记", "背诵", "刷题", "模拟",
+            "政治", "英语", "数学", "高数", "线代", "概率", "408",
+            "数据结构", "计算机组成", "操作系统", "计算机网络", "数据库"
+    };
 
     private final ExecutorService pool = Executors.newFixedThreadPool(8);
 
     public ChatService(ChatMapper chatMapper, RetrievalService retrieval, LlmClient llm,
                        SubjectMapper subjectMapper, LocalAnswerer localAnswerer,
-                       WebSearchService webSearch) {
+                       WebSearchService webSearch, KeywordAnalyzer keywordAnalyzer) {
         this.chatMapper = chatMapper;
         this.retrieval = retrieval;
         this.llm = llm;
         this.subjectMapper = subjectMapper;
         this.localAnswerer = localAnswerer;
         this.webSearch = webSearch;
+        this.keywordAnalyzer = keywordAnalyzer;
     }
 
     @PreDestroy
@@ -77,21 +97,36 @@ public class ChatService {
                     chatMapper.insertSession(session);
                 }
 
+                // ---------- 2. 关键词分析 ----------
+                // 先分析再发 meta：前端拿到关键词可以立刻展示「系统是这样理解你的问题的」
+                Subject subject = subjectMapper.findByCode(subjectCode);
+                String subjectName = subject == null ? null : subject.getName();
+                List<String> keywords = keywordAnalyzer.extract(question, subjectName);
+
                 send(emitter, "meta", obj(
                         "sessionId", session.getId(),
                         "subjectCode", subjectCode,
                         "model", llm.modelName(),
-                        "mock", llm.isMock()));
+                        "mock", llm.isMock(),
+                        "keywords", keywords));
 
-                // ---------- 2. 用户提问落库 ----------
+                // ---------- 3. 用户提问落库 ----------
                 ChatMsg userMsg = new ChatMsg();
                 userMsg.setSessionId(session.getId());
                 userMsg.setRole("user");
                 userMsg.setContent(question);
                 chatMapper.insertMsg(userMsg);
 
-                // ---------- 3. 检索（限定科目）----------
+                // ---------- 4. 检索（限定科目）----------
+                // 先用原句查；查不到再用关键词查一遍。
+                // 原因：全文索引按词切分，「死锁的四个必要条件是什么」整句几乎匹配不上，
+                // 换成「死锁 必要条件」反而能命中。
                 List<KbChunk> hits = retrieval.retrieve(subjectCode, question);
+                boolean keywordFallback = false;
+                if (hits.isEmpty() && !keywords.isEmpty()) {
+                    hits = retrieval.retrieve(subjectCode, keywordAnalyzer.toQuery(keywords));
+                    keywordFallback = !hits.isEmpty();
+                }
                 List<String> contexts = new ArrayList<>();
                 List<Map<String, Object>> citations = new ArrayList<>();
                 for (KbChunk c : hits) {
@@ -132,11 +167,13 @@ public class ChatService {
                 if (llm.isMock()) {
                     LocalAnswerer.Answer local = localAnswerer.build(question, hits);
                     String text = local.text;
+                    boolean answered = local.matched;
                     // 题库优先、联网兜底：只有「本地没命中」时才去问搜索引擎
-                    if (!local.matched && webSearch.isEnabled()) {
+                    if (!answered && inScope(question, subjectName)) {
                         List<WebResult> webs = webSearch.search(question, 5);
                         if (!webs.isEmpty()) {
                             text = composeWebAnswer(webs);
+                            answered = true;
                             for (WebResult w : webs) {
                                 Map<String, Object> item = new HashMap<>();
                                 item.put("docTitle", w.getTitle());
@@ -146,6 +183,11 @@ public class ChatService {
                                 citations.add(item);
                             }
                         }
+                    }
+                    if (!answered) {
+                        text = "这个问题超出了本程序的范围，我不回答。\n\n" + SCOPE_NOTICE
+                                + "\n\n你可以问：" + (subjectName == null ? "考研" : subjectName)
+                                + "相关的概念、公式、题型或复习方法。";
                     }
                     localAnswerer.emit(text, sink);
                 } else {
@@ -229,6 +271,28 @@ public class ChatService {
         }
         sb.append("\n（联网检索模式：以上为搜索结果摘要，未调用大模型；点开引用来源可看原文）");
         return sb.toString();
+    }
+
+    /**
+     * 这个问题是否属于「考研范围」。
+     *
+     * 判据很朴素：问题里出现当前科目名，或出现考研/学科相关的词，就算在范围内。
+     * 宁可宽松一点（漏判的代价是回答一个无关问题），也不能太严 ——
+     * 误判「中值定理怎么想」为越界会直接影响正常使用。
+     */
+    private boolean inScope(String question, String subjectName) {
+        if (question == null) {
+            return false;
+        }
+        if (subjectName != null && question.contains(subjectName)) {
+            return true;
+        }
+        for (String m : SCOPE_MARKERS) {
+            if (question.contains(m)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static Map<String, Object> obj(Object... kv) {
