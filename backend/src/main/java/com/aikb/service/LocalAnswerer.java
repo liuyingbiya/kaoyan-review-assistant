@@ -46,13 +46,29 @@ public class LocalAnswerer {
     private static final int MAX_SENTENCES = 5;
 
     /**
-     * 生成回答并流式回调。
+     * 回答结果。
+     *
+     * matched = false 表示「资料里没找到能回答的句子」，调用方可以据此决定
+     * 要不要再联网搜一次（题库优先、外部兜底）。
+     */
+    public static class Answer {
+        public final String text;
+        public final boolean matched;
+
+        public Answer(String text, boolean matched) {
+            this.text = text;
+            this.matched = matched;
+        }
+    }
+
+    /**
+     * 只用本地资料组织回答（不联网、不调模型）。
      *
      * @param question 用户问题
      * @param chunks   检索到的资料片段（按相关度从高到低）
-     * @param onDelta  每生成一小段就回调一次，用于 SSE 推送
+     * @return 回答文本 + 是否命中（没命中时调用方可以再走联网兜底）
      */
-    public void answer(String question, List<KbChunk> chunks, Consumer<String> onDelta) {
+    public Answer build(String question, List<KbChunk> chunks) {
         List<String> sentences = new ArrayList<>();
         List<String> sources = new ArrayList<>();
 
@@ -73,8 +89,8 @@ public class LocalAnswerer {
         }
 
         if (sentences.isEmpty()) {
-            stream("资料里没有检索到相关内容。\n\n可以试试：\n- 换个说法再问一次\n- 点右上角「资料管理」把相关笔记导入进来", onDelta);
-            return;
+            return new Answer("资料里没有检索到相关内容。\n\n可以试试：\n- 换个说法再问一次\n"
+                    + "- 点右上角「资料管理」把相关笔记导入进来", false);
         }
 
         // ---------- 打分 ----------
@@ -125,10 +141,9 @@ public class LocalAnswerer {
         }
 
         if (picked.isEmpty()) {
-            stream("资料里没有直接答案，但我检索到了这些相关内容：\n\n"
+            return new Answer("资料里没有直接答案，但我检索到了这些相关内容：\n\n"
                     + firstSentences(sentences, 3)
-                    + "\n建议换个更具体的问法，或者补充相关资料。", onDelta);
-            return;
+                    + "\n建议换个更具体的问法，或者补充相关资料。", false);
         }
 
         // ---------- 组织输出 ----------
@@ -148,7 +163,7 @@ public class LocalAnswerer {
         sb.append("\n—— 摘自：").append(String.join("、", src));
         sb.append("\n（离线检索模式：回答由资料原文摘录组成，未调用大模型）");
 
-        stream(sb.toString(), onDelta);
+        return new Answer(sb.toString(), true);
     }
 
     /** 按问题类型选一句引导语，让回答读起来像是"回答"而不是"贴原文" */
@@ -386,8 +401,13 @@ public class LocalAnswerer {
         return sb.toString();
     }
 
+    /** 便捷方法：生成回答并直接流式回调（供测试与旧调用方使用） */
+    public void answer(String question, List<KbChunk> chunks, Consumer<String> onDelta) {
+        emit(build(question, chunks).text, onDelta);
+    }
+
     /** 按小块流式下发，模拟打字效果（前端本来就是边收边渲染） */
-    private void stream(String text, Consumer<String> onDelta) {
+    public void emit(String text, Consumer<String> onDelta) {
         int step = 6;
         for (int i = 0; i < text.length(); i += step) {
             int end = Math.min(i + step, text.length());
