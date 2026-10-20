@@ -487,6 +487,26 @@ textarea {
   white-space: pre-wrap;
 }
 
+/* 联网结果：标题做成链接，网址单独一行小字 */
+.citation-url {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #9aa7b6;
+  word-break: break-all;
+}
+
+.cite-link {
+  color: #2f6fd0;
+  font-size: 12px;
+  text-decoration: none;
+  border-bottom: 1px dashed #a9c4ee;
+}
+
+.cite-link:hover {
+  color: #1b53a8;
+  border-bottom-color: #2f6fd0;
+}
+
 /* ---------------- 输入区 ---------------- */
 .composer {
   display: flex;
