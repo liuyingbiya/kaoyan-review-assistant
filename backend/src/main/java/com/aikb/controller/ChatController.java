@@ -48,6 +48,8 @@ public class ChatController {
         m.put("hint", llm.isMock()
                 ? "离线检索模式（不调用大模型、不消耗额度）"
                 : "已接入 DeepSeek");
+        // 使用范围声明：前端在开始界面直接展示，避免用户问无关问题
+        m.put("notice", ChatService.SCOPE_NOTICE);
         return m;
     }
 }
