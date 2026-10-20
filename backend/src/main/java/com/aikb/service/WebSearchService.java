@@ -76,7 +76,10 @@ public class WebSearchService {
         if (!enabled || question == null || question.trim().isEmpty()) {
             return new ArrayList<>();
         }
-        String key = question.trim();
+        String key = buildQuery(question);
+        if (key.isEmpty()) {
+            return new ArrayList<>();
+        }
         CacheEntry cached = cache.get(key);
         if (cached != null && !cached.expired(cacheMinutes)) {
             return limit(cached.results, limit);
@@ -107,6 +110,26 @@ public class WebSearchService {
             cache.put(key, new CacheEntry(results));
         }
         return limit(results, limit);
+    }
+
+    /**
+     * 把自然语言问句变成搜索引擎能用的关键词。
+     *
+     * 为什么必须处理：直接拿整句去搜，「2026年考研报名时间是什么时候？」
+     * 会被 Bing 拆成以「2026年」为主的查询，返回「2026年_百度百科」这种无关结果。
+     * 去掉疑问词和标点后，「2026年考研报名时间」才是有区分度的关键词。
+     */
+    String buildQuery(String question) {
+        String s = question;
+        // 注意：正则备选是「从左到右」匹配的，而且匹配起点在「是」这个字上。
+        // 所以必须把「是什么时候」整体写在「是什么」前面，否则先命中「是什么」，
+        // 剩下一个「时候」混进关键词里。
+        s = s.replaceAll(
+                "(是什么时候|什么时候|是多少|是什么|有哪几种|是哪几种|有哪些|怎么办|怎么样|怎么|如何|为什么|请问|帮我|一下)", " ");
+        s = s.replaceAll("[？?。！!，,；;：:、\"'“”‘’（）()]", " ");
+        s = s.replaceAll("\\s+", " ").trim();
+        // 关键词太少（比如只剩「考研」两个字）就别浪费一次网络请求
+        return s.length() >= 2 ? s : "";
     }
 
     // ============================================================
