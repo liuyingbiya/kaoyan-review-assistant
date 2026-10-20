@@ -86,6 +86,16 @@ class WebSearchServiceTest {
     }
 
     @Test
+    void 查询词要去掉疑问词与标点() {
+        assertEquals("2026年考研报名时间", svc.buildQuery("2026年考研报名时间是什么时候？"));
+        assertEquals("死锁的四个必要条件", svc.buildQuery("死锁的四个必要条件是什么？"));
+        assertEquals("考研英语新题型", svc.buildQuery("考研英语新题型有哪几种？"));
+        // 全是疑问词和标点时，宁可返回空，别拿垃圾词去搜
+        assertTrue(svc.buildQuery("？").isEmpty());
+        assertTrue(svc.buildQuery("是什么").isEmpty());
+    }
+
+    @Test
     void 关闭时搜索直接返回空_不打网络() {
         // 没经过 Spring 注入时 enabled 默认 false：必须安全降级，不能抛异常
         assertFalse(svc.isEnabled());
