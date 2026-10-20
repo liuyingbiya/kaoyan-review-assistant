@@ -30,6 +30,7 @@ window.AIKB = window.AIKB || {};
       const messages = ref([]);
       const draft = ref('');
       const citations = ref([]);
+      const keywords = ref([]);
       const streaming = ref(false);
       const kbDialog = ref(false);
       const loadingTree = ref(false);
@@ -126,6 +127,7 @@ window.AIKB = window.AIKB || {};
         messages.value.push({ role: 'user', content: question, citations: [] });
         draft.value = '';
         citations.value = [];
+        keywords.value = [];
         streaming.value = true;
 
         ns.openChatStream({
@@ -135,6 +137,8 @@ window.AIKB = window.AIKB || {};
           onMeta: (ev) => {
             // 第一轮由后端建会话，接住 id 后续追问才在同一会话里
             if (ev.sessionId) sessionId.value = ev.sessionId;
+            // 后端分析出的关键词：展示给用户，让他知道系统怎么理解这个问题
+            keywords.value = ev.keywords || [];
           },
           onDelta: (text) => {
             draft.value += text;
@@ -146,9 +150,11 @@ window.AIKB = window.AIKB || {};
             messages.value.push({
               role: 'assistant',
               content: draft.value,
-              citations: citations.value
+              citations: citations.value,
+              keywords: keywords.value
             });
             draft.value = '';
+            keywords.value = [];
             streaming.value = false;
             loadSessions();
           },
@@ -209,7 +215,7 @@ window.AIKB = window.AIKB || {};
       });
 
       return {
-        status, tree, current, sessions, sessionId, messages, draft, citations,
+        status, tree, current, sessions, sessionId, messages, draft, citations, keywords,
         streaming, kbDialog, loadingTree, examples, subjectName,
         pickSubject, newChat, openSession, send, removeSession, renameSession,
         loadTree, loadSessions
@@ -276,6 +282,8 @@ window.AIKB = window.AIKB || {};
           :citations="citations"
           :streaming="streaming"
           :examples="examples"
+          :notice="status.notice"
+          :keywords="keywords"
           @send="send" />
       </main>
 
